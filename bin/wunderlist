@@ -1,0 +1,72 @@
+#!/usr/bin/env ruby
+
+require './app'
+
+def main
+  api = Client.new
+
+
+  puts "Welcome, this is your navigation"
+  root = api.get
+
+  link_index = index_links(root)
+  link_index.each do |id, link|
+    puts "- [#{id}] #{link.name}: #{link.default_method.upcase} #{link.base_href}"
+  end
+
+  q1 = "> Pick a section to start with (from 1 to #{link_index.size})"
+  response = nil
+  loop do
+    puts q1
+    response = gets.chomp.to_i
+    break if link_index.include?(response)
+    puts 'Error:That number is not in the list, use ^C to exit'
+    puts
+  end
+
+
+  result = Client.options(link_index[response].base_href)
+  allowed = result.header['allow'].scan(/\w+/)
+
+  current_link = link_index[response].name
+
+  puts "Available options on #{current_link}"
+  methods_index = {}
+  allowed.map.with_index.each do |x,i|
+    if x != 'OPTIONS' && x != 'HEAD'
+      puts "- [#{i}] #{x}"
+      methods_index[i] = x
+    end
+  end
+
+  response = nil
+  loop do
+    puts "> What you want to do?"
+    response = gets.chomp.to_i
+    break if methods_index.include?(response)
+    puts 'Error:That number is not in the list, use ^C to exit'
+    puts
+  end
+
+  actions = {
+    "GET" => Proc.new { root.send(current_link.to_sym) },
+    "POST" => Proc.new { 
+        response = nil
+        loop do
+          puts "> Type a new task in plain text, submit with an enter?"
+          response = gets.chomp
+          break unless response.nil?
+          puts 'Errors: Please type the title of your todo or ^C'
+          puts
+        end
+        root.tasks.post(title: response)
+    }
+  }
+
+  current_action = methods_index[response]
+
+  puts "> U have chosen #{current_action}"
+  result = actions[current_action].call
+end
+
+main
