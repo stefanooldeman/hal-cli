@@ -12,8 +12,8 @@ class Client < HyperResource
     end
   end
 
-  def self.options(uri)
-    uri = URI(uri)
+  def options
+    uri = URI(to_link.base_href)
 
     Net::HTTP.start(uri.host, uri.port) do |http|
       request = Net::HTTP::Options.new uri
@@ -22,9 +22,13 @@ class Client < HyperResource
   end
 end
 
-def index_links(response)
-  list = response.links.to_a
-  links = list.map { |name, obj| obj.tap { |x| x.name = name } }
-  (1..list.size).zip(links).to_h
+class Util
+  def self.index_links(response)
+    list = response.links.to_a
+    links = list.map { |name, obj| obj.tap { |x| x.name = name } }
+    (1..list.size).zip(links).to_h
+  end
+
 end
+
 

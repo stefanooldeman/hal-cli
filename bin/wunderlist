@@ -2,71 +2,71 @@
 
 require './app'
 
-def main
-  api = Client.new
-
-
+start = State.new :start do |api, _, data|
   puts "Welcome, this is your navigation"
-  root = api.get
 
-  link_index = index_links(root)
+  response = api.get
+  link_index = Util.index_links(response)
   link_index.each do |id, link|
     puts "- [#{id}] #{link.name}: #{link.default_method.upcase} #{link.base_href}"
   end
+  data[:link_index] = link_index
+  puts "Pick a section to start with (from 1 to #{link_index.size})"
+end
+start.eval do |response, data|
+  link = data[:link_index][response.to_i]
+  { data: link, message: "> Working with '#{link.name}'" }
+end
 
-  q1 = "> Pick a section to start with (from 1 to #{link_index.size})"
-  response = nil
-  loop do
-    puts q1
-    response = gets.chomp.to_i
-    break if link_index.include?(response)
-    puts 'Error:That number is not in the list, use ^C to exit'
-    puts
-  end
-
-
-  result = Client.options(link_index[response].base_href)
+actions = State.new :actions do |api, current_link, data|
+  result = api.options
   allowed = result.header['allow'].scan(/\w+/)
 
-  current_link = link_index[response].name
-
-  puts "Available options on #{current_link}"
+  puts "Available options on #{current_link.name}"
   methods_index = {}
+  data[:methods_index] = methods_index
   allowed.map.with_index.each do |x,i|
     if x != 'OPTIONS' && x != 'HEAD'
       puts "- [#{i}] #{x}"
       methods_index[i] = x
     end
   end
-
-  response = nil
-  loop do
-    puts "> What you want to do?"
-    response = gets.chomp.to_i
-    break if methods_index.include?(response)
-    puts 'Error:That number is not in the list, use ^C to exit'
-    puts
+end
+actions.eval do |response|
+  method = data[:methods_index][response.to_i]
+  case method
+  when "GET"
+    # push new state to print tasks and ask what to do.
+  when "POST"
+    # push new state to next to create a task
   end
 
-  actions = {
-    "GET" => Proc.new { root.send(current_link.to_sym) },
-    "POST" => Proc.new { 
-        response = nil
-        loop do
-          puts "> Type a new task in plain text, submit with an enter?"
-          response = gets.chomp
-          break unless response.nil?
-          puts 'Errors: Please type the title of your todo or ^C'
-          puts
-        end
-        root.tasks.post(title: response)
-    }
-  }
-
-  current_action = methods_index[response]
-
-  puts "> U have chosen #{current_action}"
-  result = actions[current_action].call
+  if methods_index.include?(response)
+    { data: method, message: "You picked #{method}" }
+  end
 end
 
-main
+# list_tasks = State.new :list_tasks, do 
+#   root.send(current_link.to_sym)
+#   # ask what you want to do with the list of tasks?
+# end
+# list_tasks.eval do |response|
+# end
+#
+# task_actions = State.new :create_task do |api, method, new|
+#   response = nil
+#   loop do
+#     puts "> Type a new task in plain text, submit with an enter?"
+#     response = gets.chomp
+#     break unless response.nil?
+#     puts 'Errors: Please type the title of your todo or ^C'
+#     puts
+#   end
+#   root.tasks.post(title: response)
+# end
+
+api = Client.new
+fsm = FSM.new(api)
+fsm.add(start)
+fsm.add(actions)
+fsm.begin
