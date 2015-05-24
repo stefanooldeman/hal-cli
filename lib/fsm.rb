@@ -1,73 +1,118 @@
+require 'ostruct'
+
+
 class FSM
-  attr_accessor :data 
+  class EndOfProgram < Exception; end
+  class InvalidResponse < Exception; end
+  HEADER = 'Wunderlist> '
 
   def initialize(api)
     @api = api
-    @result = api
-    @register = {}
-    @states_q = []
   end
 
   def begin
     transition
   end
 
-  def next
+  def add(state)
+    queue << state
+    queue.size
   end
 
-  def add(state)
-    @register[state.id] = state
-    @states_q << state
+  def self.puts(*args)
+    output = Proc.new { |arg| IO.send(:puts, HEADER + arg.to_s) }
+    if args.empty?
+      output.call ''
+    else
+      args.each { |arg| output.call arg }
+    end
   end
 
   protected
 
+  def api
+    if @previous_state
+      @previous_state.api
+    else
+      @api
+    end
+  end
+
+  def queue; @states_queue ||= [] end
+
   def transition
     loop do # REPL
-      puts do_eval(*read)
+      begin
+        FSM::puts do_eval(*read)
+      rescue EndOfProgram, Interrupt
+        FSM::puts 'Exiting now..'
+        break
+      end
     end
   end
 
   def read
-    if @result
-      @_read_state = @states_q.shift
-      @_read_state.setup(@result || api, @result)
-    else
-      # if result is falsy, then it must be the previous run failed.
-      # so we don't transition to a new state
-      puts 'Error: that was invalid input, type ^C to exit'
-      puts
-    end
-    [@_read_state, gets.chomp]
+    raise EndOfProgram.new if queue.empty?
+
+    @state = queue.shift
+    @state.setup(api)
+    ask_input
   end
 
   def do_eval(state, response)
-    result = state.do_eval(response)
-    @result = result[:data]
-    result = result[:message]
+    new_states = []
+    begin
+      result = state.do_eval(api, response, new_states)
+      @previous_state = state
+    rescue InvalidResponse
+      # if result is falsy, then it must be the previous run failed.
+      # so we don't transition to a new state
+      FSM::puts 'Error: that was invalid input, type ^C to exit'
+      do_eval(*ask_input) #ask again
+    end
+
+    new_states.each do |x|
+      queue << x
+    end
+    result # for printing output
   end
+
+  def ask_input
+    IO.send(:print, HEADER) # :( otherwise it can't be mocked
+    [@state, wait_for_input]
+  end
+
+  def wait_for_input 
+    $stdin.gets.chomp
+  end
+
 end
 
 class State
-  attr_reader :id
-  def initialize(id, &eval_block)
+  attr_reader :id, :data, :setup_block
+  attr_accessor :api
+  def initialize(id, &block)
     @id = id
-    @pre_read = eval_block if block_given?
-    @data = {}
+    @data = OpenStruct.new
+    @setup_block = block if block_given?
+    @api = nil
   end
 
   def eval(&block)
     @eval_block = block
   end
 
-  def setup(current_resource_api, state)
-    if @pre_read
-      # state is result returned in eval[:data], @data is new to be used for storage
-      @pre_read.call(current_resource_api, state, @data)
+  def setup(current_resource)
+    if @setup_block
+      @setup_block.call(current_resource, self)
     end
   end
 
-  def do_eval(response)
-    @eval_block.call(response, @data)
+  def do_eval(api, response, new_states = [])
+    data.response = response
+    @eval_block.call(api, self, new_states)
   end
+
+  # alias methods
+  def response; data.response end
 end

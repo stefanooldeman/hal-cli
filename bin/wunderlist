@@ -2,71 +2,82 @@
 
 require './app'
 
-start = State.new :start do |api, _, data|
-  puts "Welcome, this is your navigation"
-
-  response = api.get
-  link_index = Util.index_links(response)
+def print_links(link_index)
   link_index.each do |id, link|
     puts "- [#{id}] #{link.name}: #{link.default_method.upcase} #{link.base_href}"
   end
-  data[:link_index] = link_index
-  puts "Pick a section to start with (from 1 to #{link_index.size})"
-end
-start.eval do |response, data|
-  link = data[:link_index][response.to_i]
-  { data: link, message: "> Working with '#{link.name}'" }
 end
 
-actions = State.new :actions do |api, current_link, data|
+# Navigate to a link
+start = State.new :start do |api, state|
+  puts "Welcome, this is your navigation"
+  state.api = api.get
+  link_index = Util.index_links(state.api) 
+  print_links(link_index)
+  state.data.link_index = link_index
+  puts "Pick a section to start with (from 1 to #{link_index.size})"
+end
+start.eval do |api, state, _|
+  link = state.data.link_index[state.response.to_i]
+  raise FSM::InvalidResponse.new if link.nil?
+
+  state.data.link = link
+  "> Working with '#{link.name}'"
+end
+
+
+# ### Create a task ###
+# create_task = State.new :create_task do |api, data|
+#   puts "> Type a new task in plain text, submit with an enter?"
+# end
+# create_task.eval do |api, _state, _|
+#   api.post(title: state.response)
+# end
+
+# ### List tasks ###
+# list_tasks = State.new :list_tasks do |api, state| 
+#   # ask what you want to do with the list of tasks?
+# end
+# list_tasks.eval do |api, state, queue|
+# end
+
+# Actions on a chosen link
+options = State.new :options do |api, state|
+  current_link = state.data.link # available
+  binding.pry
+
   result = api.options
   allowed = result.header['allow'].scan(/\w+/)
 
   puts "Available options on #{current_link.name}"
   methods_index = {}
-  data[:methods_index] = methods_index
   allowed.map.with_index.each do |x,i|
     if x != 'OPTIONS' && x != 'HEAD'
       puts "- [#{i}] #{x}"
       methods_index[i] = x
     end
   end
+  state.data.methods_index
 end
-actions.eval do |response|
-  method = data[:methods_index][response.to_i]
+options.eval do |api, state, queue|
+  method = state.data.methods_index[state.response]
+  raise FSM::InvalidResponse if method.nil?
+
+  # store: state.data.method = method
+
   case method
   when "GET"
-    # push new state to print tasks and ask what to do.
+    queue << list_tasks
   when "POST"
     # push new state to next to create a task
   end
 
-  if methods_index.include?(response)
-    { data: method, message: "You picked #{method}" }
-  end
+  "You picked #{method}"
 end
 
-# list_tasks = State.new :list_tasks, do 
-#   root.send(current_link.to_sym)
-#   # ask what you want to do with the list of tasks?
-# end
-# list_tasks.eval do |response|
-# end
-#
-# task_actions = State.new :create_task do |api, method, new|
-#   response = nil
-#   loop do
-#     puts "> Type a new task in plain text, submit with an enter?"
-#     response = gets.chomp
-#     break unless response.nil?
-#     puts 'Errors: Please type the title of your todo or ^C'
-#     puts
-#   end
-#   root.tasks.post(title: response)
-# end
 
 api = Client.new
 fsm = FSM.new(api)
 fsm.add(start)
-fsm.add(actions)
+fsm.add(options)
 fsm.begin
