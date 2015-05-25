@@ -23,10 +23,31 @@ class Client < HyperResource
 end
 
 class Util
-  def self.index_links(response)
-    list = response.links.to_a
-    links = list.map { |name, obj| obj.tap { |x| x.name = name } }
-    (1..list.size).zip(links).to_h
+  def self.index_links(links)
+    ready = []
+    pending = []
+    if links.is_a?(Hash)
+      links.each do |name, obj|
+        if obj.is_a?(Array)
+          pending << obj
+        else # safely assume HyperResource::Link. Else add edgecase above
+          ready << obj.tap { |x| x.name = name }
+        end
+      end
+    end
+
+    index = (1..ready.size).zip(ready)
+    pending.each do |list|
+      start = index.size + 1; n = start + list.size - 1
+      index += (start..n).zip(list)
+    end
+    return index.to_h
+  end
+
+  def self.index_embedded(hash)
+    list = hash.to_a
+    # links = list.map { |name, obj| obj.tap { |x| x.name = name } }
+    (1..list.size).zip(list).to_h
   end
 
 end

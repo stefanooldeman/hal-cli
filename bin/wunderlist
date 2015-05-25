@@ -2,82 +2,144 @@
 
 require './app'
 
-def print_links(link_index)
+def print_links(link_index, print_links=true)
   link_index.each do |id, link|
-    puts "- [#{id}] #{link.name}: #{link.default_method.upcase} #{link.base_href}"
+    print "- [#{id}] #{link.name}"
+    print ": #{link.default_method.upcase} #{link.base_href}" if print_links
+    print "\n"
   end
 end
 
+registry = {}
+
 # Navigate to a link
-start = State.new :start do |api, state|
-  puts "Welcome, this is your navigation"
+registry[:start] = State.new :start do |api, state|
+  FSM::puts "Welcome, this is your navigation"
   state.api = api.get
-  link_index = Util.index_links(state.api) 
+
+  # TODO this might be duplicated, check if list_links can be pushed as a state instead.
+  link_index = Util.index_links(state.api.links)
   print_links(link_index)
   state.data.link_index = link_index
-  puts "Pick a section to start with (from 1 to #{link_index.size})"
+  FSM::puts "Pick a section to start with (from 1 to #{link_index.size})"
 end
-start.eval do |api, state, _|
+registry[:start].eval do |api, state, _|
   link = state.data.link_index[state.response.to_i]
   raise FSM::InvalidResponse.new if link.nil?
 
-  state.data.link = link
+  state.api = link
+  state.data.delete_field('link_index')
+  state.data.section = link
   "> Working with '#{link.name}'"
 end
 
+registry[:delete_resource] = State.new :delete_resource do |api, state|
+  FSM::puts "Are you sure to delete this [Y/n]:\n#{api.body.inspect}"
+end
+registry[:delete_resource].eval do |api, state, queue|
+  if state.response == 'Y'
+    api.delete
+    state.api = state.data.section
+    queue << registry[:list_links]
+    "Deleted! back to #{state.api.name}"
+  else
+    state.api = Client.new.get
+    queue << registry[:list_links]
+    'Going back to links'
+  end
+end
 
-# ### Create a task ###
-# create_task = State.new :create_task do |api, data|
-#   puts "> Type a new task in plain text, submit with an enter?"
+# ### List ###
+registry[:list_links] = State.new :list_links do |api, state|
+  link_index = Util.index_links(api.links)
+  print_links(link_index)
+  state.data.link_index = link_index
+  FSM::puts "Pick a link (from 1 to #{link_index.size})"
+end
+
+registry[:list_links].eval do |api, state, queue|
+  link = state.data.link_index[state.response.to_i]
+  raise FSM::InvalidResponse.new if link.nil?
+
+  queue << registry[:options]
+  state.api = link
+  nil
+end
+
+# registry[:restart] = State.new :restart do |api, state|
+#   FSM::puts "Hit enter to restart or ^C to exit"
 # end
-# create_task.eval do |api, _state, _|
-#   api.post(title: state.response)
+# registry[:restart].eval do |api, state, queue|
+#   state.api = api.root
+#   queue << registry[:list_links]
 # end
 
-# ### List tasks ###
-# list_tasks = State.new :list_tasks do |api, state| 
-#   # ask what you want to do with the list of tasks?
-# end
-# list_tasks.eval do |api, state, queue|
-# end
+confirm_and_list = State.new(:confirm) do
+  puts 'Hit enter to continue, or ^C to quit'
+end
+confirm_and_list.eval do |_api, _state, queue|
+  queue << registry[:list_links]
+  'loading list of tasks'
+end
+
+### Create a task ###
+create_resource = State.new :create_task do |api, data|
+  puts "> Type json body in text, submit with an enter?"
+end
+create_resource.eval do |api, state, queue|
+  raise FSM::InvalidResponse.new if state.response.empty?
+  begin
+    data = JSON.parse(state.response)
+  rescue
+    raise FSM::InvalidResponse.new
+  end
+  response = api.post(data)
+  state.api = response
+  queue << registry[:list_links]
+  "Created \n #{response.links[:self].href}"
+end
 
 # Actions on a chosen link
-options = State.new :options do |api, state|
-  current_link = state.data.link # available
-  binding.pry
+registry[:options] = State.new :options do |api, state|
+  response = api.options
+  allowed = response.header['allow'].scan(/\w+/)
 
-  result = api.options
-  allowed = result.header['allow'].scan(/\w+/)
-
-  puts "Available options on #{current_link.name}"
+  if api.is_a?(HyperResource::Link)
+    FSM::puts "Available options on '#{api.name}'"
+  else
+    FSM::puts "Available options"
+  end
   methods_index = {}
+
   allowed.map.with_index.each do |x,i|
     if x != 'OPTIONS' && x != 'HEAD'
       puts "- [#{i}] #{x}"
       methods_index[i] = x
     end
   end
-  state.data.methods_index
+
+  state.data.methods_index = methods_index
 end
-options.eval do |api, state, queue|
-  method = state.data.methods_index[state.response]
+registry[:options].eval do |api, state, queue|
+  method = state.data.methods_index[state.data.response.to_i]
   raise FSM::InvalidResponse if method.nil?
 
-  # store: state.data.method = method
-
+  state.api = api # need to reset the current object's api. Because of it's re-use.
   case method
   when "GET"
-    queue << list_tasks
+    FSM::puts JSON.pretty_generate(api.get.body)
+    queue << registry[:list_links]
   when "POST"
-    # push new state to next to create a task
+    queue << create_resource
+  when "DELETE"
+    queue << registry[:delete_resource]
   end
 
-  "You picked #{method}"
+  "You picked #{method} for #{api.name}"
 end
-
 
 api = Client.new
 fsm = FSM.new(api)
-fsm.add(start)
-fsm.add(options)
+fsm.add(registry[:start])
+fsm.add(registry[:options])
 fsm.begin

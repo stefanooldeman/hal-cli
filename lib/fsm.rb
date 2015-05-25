@@ -30,12 +30,9 @@ class FSM
 
   protected
 
-  def api
-    if @previous_state
-      @previous_state.api
-    else
-      @api
-    end
+  def update_api
+    new_api = @previous_state && @previous_state.api
+    @api = new_api unless new_api.nil?
   end
 
   def queue; @states_queue ||= [] end
@@ -43,8 +40,9 @@ class FSM
   def transition
     loop do # REPL
       begin
-        FSM::puts do_eval(*read)
+        FSM::puts do_eval(read)
       rescue EndOfProgram, Interrupt
+        puts
         FSM::puts 'Exiting now..'
         break
       end
@@ -55,20 +53,22 @@ class FSM
     raise EndOfProgram.new if queue.empty?
 
     @state = queue.shift
-    @state.setup(api)
+    update_api
+    @state.setup(@api, @previous_state)
     ask_input
   end
 
-  def do_eval(state, response)
+  def do_eval(response)
     new_states = []
     begin
-      result = state.do_eval(api, response, new_states)
-      @previous_state = state
+      result = @state.do_eval(@api, response, new_states)
+      @previous_state = @state
+      # update api?
     rescue InvalidResponse
       # if result is falsy, then it must be the previous run failed.
       # so we don't transition to a new state
       FSM::puts 'Error: that was invalid input, type ^C to exit'
-      do_eval(*ask_input) #ask again
+      do_eval(ask_input) #ask again
     end
 
     new_states.each do |x|
@@ -79,7 +79,7 @@ class FSM
 
   def ask_input
     IO.send(:print, HEADER) # :( otherwise it can't be mocked
-    [@state, wait_for_input]
+    wait_for_input
   end
 
   def wait_for_input 
@@ -102,7 +102,8 @@ class State
     @eval_block = block
   end
 
-  def setup(current_resource)
+  def setup(current_resource, previous_state)
+    merge_data(previous_state) if previous_state
     if @setup_block
       @setup_block.call(current_resource, self)
     end
@@ -115,4 +116,11 @@ class State
 
   # alias methods
   def response; data.response end
+
+  private
+
+  def merge_data(previous_state)
+    new_data = data.to_h.merge(previous_state.data.to_h)
+    @data = OpenStruct.new(new_data)
+  end
 end

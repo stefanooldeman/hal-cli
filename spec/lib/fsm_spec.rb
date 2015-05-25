@@ -6,12 +6,13 @@ RSpec.describe FSM do
   let(:api2) { instance_double(Client, :api2) }
   let(:state_one) { instance_double(State, :state_one, api: nil) }
   let(:state_two) { instance_double(State, :state_two, api: nil) }
+  let(:state_three) { instance_double(State, :state_three) }
 
   subject(:fsm) { described_class.new(api) }
 
   before do
     allow(subject).to receive(:wait_for_input) { nil }
-    allow(IO).to receive(:print) # no stdout
+    
     allow(IO).to receive(:puts) # no stdout
   end
 
@@ -38,14 +39,14 @@ RSpec.describe FSM do
 
       it 'transitions to first state' do
         expect(fsm).to receive(:wait_for_input) { 'hello' }
-        expect(state_one).to receive(:setup).with(api)
+        expect(state_one).to receive(:setup).with(api, nil)
         expect(state_one).to receive(:do_eval).with(api, 'hello', [])
       end
 
       it 're-iterates state if eval raises InvalidResponse' do
         expect(fsm).to receive(:wait_for_input) { 'hello' }
         expect(fsm).to receive(:wait_for_input).and_raise(Interrupt) # prevent recursive loop
-        expect(state_one).to receive(:setup).with(api)
+        expect(state_one).to receive(:setup).with(api, nil)
         expect(state_one).to receive(:do_eval).with(api, 'hello', [])
            .and_raise(FSM::InvalidResponse)
         expect(fsm).to receive(:ask_input).twice.and_call_original
@@ -56,6 +57,7 @@ RSpec.describe FSM do
       before do
         fsm.add(state_one)
         fsm.add(state_two)
+        allow(state_one).to receive(:api)
         allow(state_one).to receive(:data)
         allow(state_two).to receive(:data)
       end
@@ -68,27 +70,34 @@ RSpec.describe FSM do
         expect(state_two).to receive(:do_eval).ordered
       end
 
-      it 'gives along the state#api to next state' do
-        expect(state_one).to receive(:setup).with(api)
+      it 'gives along the api and state to next state' do
+        expect(state_one).to receive(:setup).with(api, nil)
         expect(state_one).to receive(:api).and_return(api2)
         expect(state_one).to receive(:do_eval)
-        expect(state_two).to receive(:setup).with(api2)
+        expect(state_two).to receive(:setup).with(api2, state_one)
         expect(state_two).to receive(:do_eval)
-      end
-
-      xit 'gives along the state#data to next state' do
-        expect(state_one).to receive(:setup)
-        expect(state_one).to receive(:data)
-          .and_return(OpenStruct.new({ response: 'y', foo: 'bar' }))
-        expect(state_one).to receive(:do_eval)
-
-        expect(state_two).to receive(:setup)
-        expect(state_two).to receive(:data)
-          .and_return(OpenStruct.new({ response: '1' }))
-        expect(state_two).to receive(:do_eval)
-
-        # expect(state_two.data.to_h).to eq({foo: 'bar'})
       end
     end
-  end #described begin
+
+    context 'with three states' do
+      before do
+        [state_one, state_two, state_three].each do |state|
+          fsm.add(state)
+          allow(state).to receive(:data)
+          allow(state).to receive(:do_eval)
+        end
+      end
+      after { fsm.begin }
+
+      it 'memoize the returned api' do
+        expect(state_one).to receive(:setup).with(api, nil)
+        expect(state_one).to receive(:api) { api2 }
+
+        expect(state_two).to receive(:setup).with(api2, state_one)
+        expect(state_two).to receive(:api) { nil }
+
+        expect(state_three).to receive(:setup).with(api2, state_two)
+      end
+    end
+  end # described begin
 end
