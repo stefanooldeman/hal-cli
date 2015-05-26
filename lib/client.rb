@@ -1,19 +1,31 @@
-WUNDERLIST_URL = 'http://localhost:3000'
+class ClientConfig < OpenStruct
+  def self.url
+    self.api_url
+  end
+
+  def self.url=(url)
+    self.api_url = url
+  end
+end
 
 class Client < HyperResource
   attr_reader :api
 
-  self.root = WUNDERLIST_URL
-  self.headers = {'Accept' => 'application/hal+json', 'Content-Type' => 'application/json'}
+  def self.build(url)
+    self.root = url
+    self.headers = {'Accept' => 'application/hal+json', 'Content-Type' => 'application/json'}
+    self.faraday(url)
+    self.new
+  end
 
-  def self.faraday
-    @@faraday ||= Faraday.new(:url => WUNDERLIST_URL) do |faraday|
+  def self.faraday(url)
+    @@faraday ||= Faraday.new(:url => url) do |faraday|
       faraday.adapter  Faraday.default_adapter  # make requests with Net::HTTP
     end
   end
 
   def options
-    uri = URI(to_link.base_href)
+    uri = URI(URI::join(root, to_link.base_href))
 
     Net::HTTP.start(uri.host, uri.port) do |http|
       request = Net::HTTP::Options.new uri

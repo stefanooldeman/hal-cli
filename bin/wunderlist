@@ -2,6 +2,12 @@
 
 require './app'
 
+# you can switching api's, try it and most basic will work, except:
+# - providing params to urls (requires extra state to be build)
+# - http methods PUT and PATCH (and the more exotics like MOVE, COPY etc)
+API_URL = 'http://audreydemo.aws.af.cm/'
+# API_URL = 'http://localhost:3000'
+
 def print_links(link_index, print_links=true)
   link_index.each do |id, link|
     print "- [#{id}] #{link.name}"
@@ -43,7 +49,7 @@ registry[:delete_resource].eval do |api, state, queue|
     queue << registry[:list_links]
     "Deleted! back to #{state.api.name}"
   else
-    state.api = Client.new.get
+    state.api = Client.build(API_URL).get
     queue << registry[:list_links]
     'Going back to links'
   end
@@ -96,7 +102,8 @@ create_resource.eval do |api, state, queue|
   response = api.post(data)
   state.api = response
   queue << registry[:list_links]
-  "Created \n #{response.links[:self].href}"
+  puts "Created: #{response.links[:self].href} and showing OPTIONS"
+  ''
 end
 
 # Actions on a chosen link
@@ -127,7 +134,10 @@ registry[:options].eval do |api, state, queue|
   state.api = api # need to reset the current object's api. Because of it's re-use.
   case method
   when "GET"
-    FSM::puts JSON.pretty_generate(api.get.body)
+    FSM::puts 'Printing body (except links)'
+    body = api.get.body
+    body.delete('_links')
+    puts JSON.pretty_generate(body)
     queue << registry[:list_links]
   when "POST"
     queue << create_resource
@@ -138,7 +148,8 @@ registry[:options].eval do |api, state, queue|
   "You picked #{method} for #{api.name}"
 end
 
-api = Client.new
+
+api = Client.build(API_URL)
 fsm = FSM.new(api)
 fsm.add(registry[:start])
 fsm.add(registry[:options])
