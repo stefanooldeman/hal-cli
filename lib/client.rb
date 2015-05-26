@@ -1,13 +1,3 @@
-class ClientConfig < OpenStruct
-  def self.url
-    self.api_url
-  end
-
-  def self.url=(url)
-    self.api_url = url
-  end
-end
-
 class Client < HyperResource
   attr_reader :api
 

@@ -1,6 +1,5 @@
 require 'ostruct'
 
-
 class FSM
   class EndOfProgram < Exception; end
   class InvalidResponse < Exception; end
