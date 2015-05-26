@@ -1,1 +1,24 @@
-Wunderlist cli client
+HAL-CLI
+
+An API browser for the hal+json media type, on the command line.
+
+More detail about HAL can be found at http://stateless.co/hal_specification.html.
+
+Inspiration:
+https://github.com/mikekelly/hal-browser
+
+Required:
+- ruby-2.1 and higher
+- bundle
+
+My notes:
+This client will discover your api and present resource links and their options. The implementation is like a REPL and requires $stdin input.
+Each resource and its' available actions are pushed on top a state machine (see lib/fsm.rb). Sometimes there is no further state (action) and the program will exit. You can then restart it and follow the same chain of links provided by the HAL response in the API.
+
+To use POST, it's often usefull to first do a GET request so you can seee how the body looks like.
+
+Trivia:
+My api for example has a resource called /tasks and you can POST to it. The body I need to type looks this:
+{"title": "Help me remember doing something.."}
+
+Make sure to use the JSON spec if you're not sure: http://json.org/ (double qoutes and all that).
